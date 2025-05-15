@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Medieval Siege Simulator</title>
+    <style>
+        body { 
+            margin: 0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            font-family: Arial, sans-serif; 
+            background-color: #f0f0f0; 
+            color: #333;
+        }
+        canvas { 
+            border: 2px solid #333; 
+            background-color: #aae0aa; /* Lighter green grass */
+            display: block;
+            margin: 0 auto;
+        }
+        #ui-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #c9c9c9;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            width: 780px; /* Match canvas width */
+        }
+        .stats-bar {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .info-label { 
+            margin: 0 10px; 
+            font-size: 16px;
+            background-color: #e0e0e0;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+        button { 
+            margin: 10px 0; 
+            padding: 10px 20px; 
+            font-size: 18px; 
+            cursor: pointer; 
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .timers {
+            font-size: 14px;
+            color: #555;
+        }
+        #messageArea {
+            margin-top: 5px;
+            color: #d32f2f; /* Red for important messages */
+            font-weight: bold;
+            height: 20px; /* Reserve space */
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Medieval Siege Simulator</h1>
+    <div id="ui-container">
+        <div class="stats-bar">
+            <span class="info-label">Player Gold: <span id="playerGoldDisplay">0</span></span>
+            <span class="info-label">Player Soldiers: <span id="playerSoldiersCountDisplay">0</span></span>
+            <span class="info-label">Gate Health: <span id="gateHealthDisplay">100</span></span>
+            <span class="info-label">Enemy Gold: <span id="enemyGoldDisplay">0</span></span>
+        </div>
+        <button id="buySoldierButton">Buy Soldier (5 Gold)</button>
+        <div class="timers">
+            Arrow Rain in: <span id="arrowRainTimerDisplay">20</span>s | 
+            Caravan in: <span id="caravanTimerDisplay">30</span>s
+        </div>
+        <p id="messageArea"></p>
+    </div>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const playerGoldDisplay = document.getElementById('playerGoldDisplay');
+        const playerSoldiersCountDisplay = document.getElementById('playerSoldiersCountDisplay');
+        const gateHealthDisplay = document.getElementById('gateHealthDisplay');
+        const enemyGoldDisplay = document.getElementById('enemyGoldDisplay');
+        const buySoldierButton = document.getElementById('buySoldierButton');
+        const arrowRainTimerDisplay = document.getElementById('arrowRainTimerDisplay');
+        const caravanTimerDisplay = document.getElementById('caravanTimerDisplay');
+        const messageArea = document.getElementById('messageArea');
+
+        // Game constants
+        const SOLDIER_COST = 5;
+        const PLAYER_GOLD_PER_SECOND = 10;
+        const ENEMY_GOLD_PER_SECOND = 7; // Enemy slightly slower gold
+        const ARROW_RAIN_INTERVAL = 20000; // 20 seconds
+        const ARROW_RAIN_DAMAGE_PERCENT = 0.07; // 7% damage per arrow hit on a soldier
+        const ARROWS_IN_RAIN = 15;
+        const CARAVAN_INTERVAL = 30000; // 30 seconds
+        const CARAVAN_GOLD_REWARD = 50;
+        const CARAVAN_GOLD_TO_ENEMY = 100;
+        const CARAVAN_HEALTH = 30;
+        const INITIAL_GATE_HEALTH = 100;
+        const SOLDIER_SPEED = 0.7;
+        const SOLDIER_MAX_HEALTH = 10;
+        const SOLDIER_ATTACK_DAMAGE = 1;
+        const SOLDIER_ATTACK_RANGE = 20; // Increased range
+        const SOLDIER_ATTACK_COOLDOWN = 1000; // 1 second
+        const SOLDIER_RADIUS = 8;
+
+        // Game state
+        let playerGold = 20;
+        let playerSoldiers = [];
+        let enemyDefenders = [];
+        let gateHealth = INITIAL_GATE_HEALTH;
+        let enemyGold = 10;
+        let isGateBroken = false;
+        let gameTime = 0;
+        let lastArrowRainTime = 0;
+        let lastCaravanTime = CARAVAN_INTERVAL / 2; // Stagger caravan spawn
+        let caravan = null;
+        let activeArrows = [];
+        let gameOver = false;
+        let gameWon = false;
+        let lastMessageClearTime = 0;
+
+        // Positions
+        const playerCampPos = { x: 60, y: canvas.height / 2 };
+        const castleRect = { x: canvas.width - 120, y: canvas.height / 2 - 75, width: 100, height: 150 };
+        const gateRect = { x: castleRect.x - 10, y: castleRect.y + castleRect.height / 2 - 20, width: 10, height: 40 };
+        const bridgeRect = { x: playerCampPos.x + 50, y: canvas.height / 2 - 15, width: gateRect.x - (playerCampPos.x + 50), height: 30 };
+        const riverRect = { x: 0, y: bridgeRect.y + bridgeRect.height - 5, width: canvas.width, height: canvas.height - (bridgeRect.y + bridgeRect.height -5) };
+        const caravanSpawnPos = { x: 0, y: canvas.height - 40};
+        const caravanDestPos = { x: castleRect.x - 20, y: caravanSpawnPos.y };
+
+
+        class Soldier {
+            constructor(x, y, team) {
+                this.x = x;
+                this.y = y;
+                this.team = team;
+                this.health = SOLDIER_MAX_HEALTH;
+                this.target = null;
+                this.attackCooldownTimer = 0;
+                this.isAttackingGate = false;
+                this.state = 'advancing'; // 'advancing', 'attacking_unit', 'attacking_gate', 'idle'
+            }
+
+            draw() {
+                // Body
+                ctx.strokeStyle = this.team === 'player' ? 'navy' : '#8B0000'; // Dark Red for enemy
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y - SOLDIER_RADIUS * 1.2); // Neck
+                ctx.lineTo(this.x, this.y + SOLDIER_RADIUS * 1.2); // Torso
+                ctx.stroke();
+
+                // Head (helmet)
+                ctx.beginPath();
+                ctx.arc(this.x, this.y - SOLDIER_RADIUS * 1.5, SOLDIER_RADIUS * 0.8, 0, Math.PI * 2);
+                ctx.fillStyle = this.team === 'player' ? 'silver' : '#666';
+                ctx.fill();
+                ctx.stroke();
+
+                // Arms (simple) -> Representing sword/shield later if complex
+                ctx.beginPath();
+                ctx.moveTo(this.x - SOLDIER_RADIUS * 0.7, this.y - SOLDIER_RADIUS * 0.5);
+                ctx.lineTo(this.x + SOLDIER_RADIUS * 0.7, this.y - SOLDIER_RADIUS * 0.5);
+                ctx.stroke();
+                
+                // Legs (simple)
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y + SOLDIER_RADIUS * 1.2);
+                ctx.lineTo(this.x - SOLDIER_RADIUS * 0.6, this.y + SOLDIER_RADIUS * 2.5);
+                ctx.moveTo(this.x, this.y + SOLDIER_RADIUS * 1.2);
+                ctx.lineTo(this.x + SOLDIER_RADIUS * 0.6, this.y + SOLDIER_RADIUS * 2.5);
+                ctx.stroke();
+
+                // Health bar
+                const barWidth = SOLDIER_RADIUS * 2.5;
+                const barHeight = 4;
+                ctx.fillStyle = '#333';
+                ctx.fillRect(this.x - barWidth / 2, this.y - SOLDIER_RADIUS * 3, barWidth, barHeight);
+                ctx.fillStyle = 'green';
+                ctx.fillRect(this.x - barWidth / 2, this.y - SOLDIER_RADIUS * 3, barWidth * (this.health / SOLDIER_MAX_HEALTH), barHeight);
+            }
+
+            update(deltaTime, opposingSoldiers) {
+                if (this.attackCooldownTimer > 0) {
+                    this.attackCooldownTimer -= deltaTime;
+                }
+
+                this.findTarget(opposingSoldiers);
+
+                if (this.target) { // Attack unit
+                    this.state = 'attacking_unit';
+                    const distToTarget = Math.hypot(this.x - this.target.x, this.y - this.target.y);
+                    if (distToTarget > SOLDIER_ATTACK_RANGE) {
+                        this.moveTowards(this.target.x, this.target.y, deltaTime);
+                    } else if (this.attackCooldownTimer <= 0 && this.target.health > 0) {
+                        this.target.health -= SOLDIER_ATTACK_DAMAGE;
+                        this.attackCooldownTimer = SOLDIER_ATTACK_COOLDOWN;
+                        if (this.target.health <= 0) {
+                            this.target = null; // Target defeated
+                            this.state = 'advancing';
+                        }
+                    }
+                } else if (this.team === 'player' && !isGateBroken && gateHealth > 0) { // Player attacks gate
+                    this.state = 'attacking_gate';
+                    const gateAttackX = gateRect.x - SOLDIER_RADIUS;
+                    const gateAttackY = gateRect.y + gateRect.height / 2;
+                    if (this.x < gateAttackX) {
+                         this.moveTowards(gateAttackX, gateAttackY, deltaTime);
+                    } else if (this.attackCooldownTimer <= 0) {
+                        gateHealth -= SOLDIER_ATTACK_DAMAGE;
+                        this.attackCooldownTimer = SOLDIER_ATTACK_COOLDOWN;
+                        if (gateHealth <= 0) {
+                            gateHealth = 0;
+                            isGateBroken = true;
+                            displayMessage("Gate Destroyed! Enemy defenders emerge!");
+                            spawnEnemyDefenders();
+                            this.state = 'advancing';
+                        }
+                    }
+                } else { // Advance or idle
+                     this.state = 'advancing';
+                    if (this.team === 'player' && this.x < castleRect.x + castleRect.width / 2) {
+                        this.moveTowards(castleRect.x + castleRect.width / 2, this.y, deltaTime, 0.5); // Slower advance into castle
+                    } else if (this.team === 'enemy' && this.x > playerCampPos.x) {
+                        this.moveTowards(playerCampPos.x, this.y, deltaTime, 0.5);
+                    } else {
+                        this.state = 'idle';
+                    }
+                }
+            }
+            
+            findTarget(opposingSoldiers) {
+                if (this.target && this.target.health > 0) return; // Keep current target if valid
+
+                this.target = null;
+                let closestDist = Infinity;
+                opposingSoldiers.forEach(opponent => {
+                    if (opponent.health > 0) {
+                        const dist = Math.hypot(this.x - opponent.x, this.y - opponent.y);
+                        if (dist < closestDist && dist < SOLDIER_ATTACK_RANGE * 5) { // Engage if reasonably close
+                            closestDist = dist;
+                            this.target = opponent;
+                        }
+                    }
+                });
+            }
+
+            moveTowards(targetX, targetY, deltaTime, speedMultiplier = 1) {
+                const angle = Math.atan2(targetY - this.y, targetX - this.x);
+                this.x += Math.cos(angle) * SOLDIER_SPEED * speedMultiplier * (deltaTime / 16); // Normalize to ~60FPS
+                this.y += Math.sin(angle) * SOLDIER_SPEED * speedMultiplier * (deltaTime / 16);
+
+                // Keep on bridge (approx)
+                if (this.x > bridgeRect.x && this.x < bridgeRect.x + bridgeRect.width) {
+                    if (this.y < bridgeRect.y - SOLDIER_RADIUS) this.y = bridgeRect.y - SOLDIER_RADIUS;
+                    if (this.y > bridgeRect.y + bridgeRect.height + SOLDIER_RADIUS) this.y = bridgeRect.y + bridgeRect.height + SOLDIER_RADIUS;
+                }
+            }
+        }
+
+        function spawnEnemyDefenders() {
+            const numDefenders = 3 + Math.floor(enemyGold / SOLDIER_COST); // Spawn based on enemy gold
+            for (let i = 0; i < numDefenders; i++) {
+                enemyDefenders.push(new Soldier(
+                    castleRect.x + castleRect.width / 2 - 20 + Math.random() * 40, 
+                    castleRect.y + castleRect.height / 2 - 20 + Math.random() * 40, 
+                    'enemy'
+                ));
+            }
+            enemyGold = Math.max(0, enemyGold - numDefenders * SOLDIER_COST);
+        }
+
+        buySoldierButton.addEventListener('click', () => {
+            if (gameOver || gameWon) return;
+            if (playerGold >= SOLDIER_COST) {
+                playerGold -= SOLDIER_COST;
+                playerSoldiers.push(new Soldier(
+                    playerCampPos.x + (Math.random() - 0.5) * 20, 
+                    playerCampPos.y + (Math.random() - 0.5) * 30, 
+                    'player'
+                ));
+            } else {
+                displayMessage("Not enough gold!");
+            }
+        });
+
+        function drawPlayerCamp() {
+            // Tent
+            ctx.fillStyle = '#8B4513'; // Brown
+            ctx.beginPath();
+            ctx.moveTo(playerCampPos.x - 25, playerCampPos.y + 15);
+            ctx.lineTo(playerCampPos.x, playerCampPos.y - 25);
+            ctx.lineTo(playerCampPos.x + 25, playerCampPos.y + 15);
+            ctx.closePath();
+            ctx.fill();
+            // Tent opening
+            ctx.fillStyle = '#503000';
+            ctx.beginPath();
+            ctx.moveTo(playerCampPos.x - 10, playerCampPos.y + 15);
+            ctx.lineTo(playerCampPos.x, playerCampPos.y - 8);
+            ctx.lineTo(playerCampPos.x + 10, playerCampPos.y + 15);
+            ctx.closePath();
+            ctx.fill();
+            // Banner
+            ctx.fillStyle = 'darkgray';
+            ctx.fillRect(playerCampPos.x + 30, playerCampPos.y - 30, 5, 35); // Pole
+            ctx.fillStyle = 'blue';
+            ctx.fillRect(playerCampPos.x + 35, playerCampPos.y - 30, 20, 12); // Flag
+        }
+
+        function drawEnvironment() {
+            // River
+            ctx.fillStyle = '#6495ED'; // Cornflower blue
+            ctx.fillRect(riverRect.x, riverRect.y, riverRect.width, riverRect.height);
+            // Bridge
+            ctx.fillStyle = '#A9A9A9'; // Dark gray
+            ctx.fillRect(bridgeRect.x, bridgeRect.y, bridgeRect.width, bridgeRect.height);
+            // Bridge supports
+            ctx.fillStyle = '#888888';
+            for(let i = 0; i < bridgeRect.width; i += 60) {
+                ctx.fillRect(bridgeRect.x + i + 20, bridgeRect.y + bridgeRect.height, 20, riverRect.y - (bridgeRect.y + bridgeRect.height));
+            }
+        }
+
+        function drawCastle() {
+            ctx.fillStyle = '#808080'; // Gray
+            ctx.fillRect(castleRect.x, castleRect.y, castleRect.width, castleRect.height);
+            ctx.fillStyle = '#606060'; // Darker gray for battlements
+            for (let i = 0; i < castleRect.width; i += 20) {
+                ctx.fillRect(castleRect.x + i, castleRect.y - 10, 10, 10);
+            }
+             // Archers (visual only)
+            ctx.fillStyle = 'darkred';
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath();
+                ctx.arc(castleRect.x + castleRect.width / 2, castleRect.y + 20 + i * 25, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            // Gate
+            ctx.fillStyle = isGateBroken ? '#402000' : '#654321';
+            ctx.fillRect(gateRect.x, gateRect.y, gateRect.width, gateRect.height);
+            if (!isGateBroken) {
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(gateRect.x, gateRect.y, gateRect.width, gateRect.height);
+            }
+        }
+        
+        function drawCaravan() {
+            if (!caravan) return;
+            ctx.fillStyle = '#DAA520'; // Goldenrod
+            ctx.fillRect(caravan.x - 20, caravan.y - 15, 40, 25); // Body
+            ctx.fillStyle = 'saddlebrown'; // Wheels
+            ctx.beginPath();
+            ctx.arc(caravan.x - 15, caravan.y + 10, 7, 0, Math.PI * 2);
+            ctx.arc(caravan.x + 15, caravan.y + 10, 7, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawActiveArrows() {
+            ctx.fillStyle = 'black';
+            activeArrows.forEach(arrow => {
+                ctx.beginPath();
+                ctx.moveTo(arrow.x, arrow.y);
+                ctx.lineTo(arrow.x + Math.cos(arrow.angle) * 10, arrow.y + Math.sin(arrow.angle) * 10);
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+        }
+        
+        function updateUIDisplays() {
+            playerGoldDisplay.textContent = Math.floor(playerGold);
+            enemyGoldDisplay.textContent = Math.floor(enemyGold);
+            playerSoldiersCountDisplay.textContent = playerSoldiers.length;
+            gateHealthDisplay.textContent = gateHealth > 0 ? gateHealth : "DESTROYED";
+            
+            const timeToArrowRain = Math.max(0, Math.ceil((ARROW_RAIN_INTERVAL - (gameTime - lastArrowRainTime)) / 1000));
+            arrowRainTimerDisplay.textContent = timeToArrowRain;
+            const timeToCaravan = Math.max(0, Math.ceil((CARAVAN_INTERVAL - (gameTime - lastCaravanTime)) / 1000));
+            caravanTimerDisplay.textContent = timeToCaravan;
+
+            buySoldierButton.disabled = playerGold < SOLDIER_COST;
+            buySoldierButton.textContent = `Buy Soldier (${SOLDIER_COST} Gold)`;
+        }
+
+        function displayMessage(msg) {
+            messageArea.textContent = msg;
+            lastMessageClearTime = gameTime;
+        }
+
+        function clearMessageIfNeeded() {
+            if (messageArea.textContent !== "" && gameTime - lastMessageClearTime > 3000) { // Clear after 3s
+                messageArea.textContent = "";
+            }
+        }
+
+        let lastFrameTime = 0;
+        function gameLoop(currentTime) {
+            if (gameOver || gameWon) {
+                drawGameOverScreen();
+                return;
+            }
+            const deltaTime = currentTime - lastFrameTime;
+            lastFrameTime = currentTime;
+            gameTime += deltaTime;
+
+            clearMessageIfNeeded();
+
+            // Gold generation
+            playerGold += PLAYER_GOLD_PER_SECOND * (deltaTime / 1000);
+            enemyGold += ENEMY_GOLD_PER_SECOND * (deltaTime / 1000);
+
+            // Arrow rain
+            if (gameTime - lastArrowRainTime >= ARROW_RAIN_INTERVAL) {
+                lastArrowRainTime = gameTime;
+                displayMessage("Arrow Rain!");
+                for (let i = 0; i < ARROWS_IN_RAIN; i++) {
+                    const startX = castleRect.x + Math.random() * castleRect.width * 0.8 + castleRect.width * 0.1; // From castle front
+                    const startY = castleRect.y;
+                    // Target area around player soldiers or bridge center
+                    let targetX = bridgeRect.x + bridgeRect.width / 2 + (Math.random() - 0.5) * bridgeRect.width * 0.6;
+                    let targetY = bridgeRect.y + bridgeRect.height / 2;
+                    if (playerSoldiers.length > 0) {
+                        const rSoldier = playerSoldiers[Math.floor(Math.random() * playerSoldiers.length)];
+                        targetX = rSoldier.x + (Math.random() - 0.5) * 40;
+                        targetY = rSoldier.y + (Math.random() - 0.5) * 40;
+                    }
+                    const angle = Math.atan2(targetY - startY, targetX - startX);
+                    activeArrows.push({ x: startX, y: startY, angle: angle, speed: 4 + Math.random() * 2, life: 1500 });
+                }
+            }
+
+            activeArrows.forEach((arrow, index) => {
+                arrow.x += Math.cos(arrow.angle) * arrow.speed * (deltaTime / 16);
+                arrow.y += Math.sin(arrow.angle) * arrow.speed * (deltaTime / 16);
+                arrow.life -= deltaTime;
+
+                if (arrow.life <= 0 || arrow.x < 0 || arrow.x > canvas.width || arrow.y < 0 || arrow.y > canvas.height) {
+                    activeArrows.splice(index, 1);
+                } else {
+                    playerSoldiers.forEach(soldier => {
+                        if (soldier.health > 0 && Math.hypot(arrow.x - soldier.x, arrow.y - soldier.y) < SOLDIER_RADIUS + 5) {
+                            soldier.health -= SOLDIER_MAX_HEALTH * ARROW_RAIN_DAMAGE_PERCENT;
+                            activeArrows.splice(index, 1); // Arrow hits and disappears
+                            if (soldier.health <= 0) displayMessage("Player soldier lost to arrows!");
+                            return; // Arrow can only hit one soldier
+                        }
+                    });
+                }
+            });
+            
+            // Caravan logic
+            if (gameTime - lastCaravanTime >= CARAVAN_INTERVAL) {
+                lastCaravanTime = gameTime;
+                if (!caravan) {
+                    caravan = { x: caravanSpawnPos.x, y: caravanSpawnPos.y, health: CARAVAN_HEALTH, speed: 0.8 };
+                    displayMessage("Supply caravan approaching the castle!");
+                }
+            }
+
+            if (caravan) {
+                caravan.x += caravan.speed * (deltaTime / 16);
+                if (caravan.x >= caravanDestPos.x) {
+                    enemyGold += CARAVAN_GOLD_TO_ENEMY;
+                    displayMessage("Caravan reached castle! Enemy +"+CARAVAN_GOLD_TO_ENEMY+" gold.");
+                    caravan = null;
+                } else {
+                    playerSoldiers.forEach(soldier => { // Soldiers can attack caravan
+                        if (caravan && soldier.health > 0 && soldier.target === null && Math.hypot(soldier.x - caravan.x, soldier.y - caravan.y) < SOLDIER_ATTACK_RANGE * 1.5) {
+                            if (soldier.attackCooldownTimer <= 0) {
+                                caravan.health -= SOLDIER_ATTACK_DAMAGE;
+                                soldier.attackCooldownTimer = SOLDIER_ATTACK_COOLDOWN;
+                                if (caravan.health <= 0) {
+                                    playerGold += CARAVAN_GOLD_REWARD;
+                                    displayMessage("Caravan destroyed! You gain "+CARAVAN_GOLD_REWARD+" gold!");
+                                    caravan = null;
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            // Update soldiers
+            playerSoldiers.forEach(s => s.update(deltaTime, enemyDefenders));
+            enemyDefenders.forEach(s => s.update(deltaTime, playerSoldiers));
+
+            // Remove dead soldiers
+            playerSoldiers = playerSoldiers.filter(s => s.health > 0);
+            enemyDefenders = enemyDefenders.filter(s => s.health > 0);
+
+            // Check win/loss
+            if (isGateBroken && enemyDefenders.length === 0 && playerSoldiers.length > 0) {
+                let allPlayerIdleOrAtCastle = playerSoldiers.every(s => s.state === 'idle' || s.x > castleRect.x);
+                if(allPlayerIdleOrAtCastle) gameWon = true;
+            }
+            if (playerGold < SOLDIER_COST && playerSoldiers.length === 0 && !gameWon) {
+                gameOver = true;
+            }
+             if (isGateBroken && playerSoldiers.length === 0 && enemyDefenders.length > 0) {
+                gameOver = true;
+            }
+
+
+            // Drawing
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawEnvironment();
+            drawPlayerCamp();
+            drawCastle();
+            if (caravan) drawCaravan();
+            playerSoldiers.forEach(s => s.draw());
+            enemyDefenders.forEach(s => s.draw());
+            drawActiveArrows();
+            
+            updateUIDisplays();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function drawGameOverScreen() {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = "48px Arial";
+            ctx.fillStyle = "white";
+            ctx.textAlign = "center";
+            if (gameWon) {
+                ctx.fillStyle = "gold";
+                ctx.fillText("VICTORY!", canvas.width / 2, canvas.height / 2 - 20);
+                ctx.font = "24px Arial";
+                ctx.fillStyle = "white";
+                ctx.fillText("You have conquered the castle!", canvas.width / 2, canvas.height / 2 + 30);
+            } else {
+                ctx.fillStyle = "darkred";
+                ctx.fillText("DEFEAT!", canvas.width / 2, canvas.height / 2 - 20);
+                ctx.font = "24px Arial";
+                ctx.fillStyle = "white";
+                ctx.fillText("Your forces were overwhelmed.", canvas.width / 2, canvas.height / 2 + 30);
+            }
+            ctx.font = "18px Arial";
+            ctx.fillText("Refresh to play again.", canvas.width / 2, canvas.height / 2 + 70);
+        }
+
+        // Start game
+        updateUIDisplays();
+        lastFrameTime = performance.now();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
