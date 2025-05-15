@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>River Battle Game</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 10px; background-color: #f4f4f4; }
+        #game-container { border: 2px solid #333; padding: 15px; width: 90%; max-width: 900px; text-align: center; background-color: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 8px; }
+        
+        .status-section { display: flex; justify-content: space-around; margin-bottom: 15px; background-color: #e9ecef; padding: 10px; border-radius: 5px; font-size: 0.9em; }
+        .player-status, .ai-status { flex-basis: 48%; padding: 5px; border: 1px solid #ced4da; border-radius: 4px; }
+        .player-status { background-color: #d1e7dd; }
+        .ai-status { background-color: #f8d7da; }
+        .status-section span { font-weight: bold; }
+
+        .main-areas { display: flex; justify-content: space-between; }
+        .player-area, .ai-area { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; width: 48%; border-radius: 5px; }
+        .player-area { background-color: #e0f0ff; }
+        .ai-area { background-color: #ffe0e0; }
+        
+        .pond { width: 100px; height: 50px; background-color: #3498db; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 10px auto; border-radius: 5px; font-weight: bold; }
+        
+        #river-area { background-color: #a9d0f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        #river-area p { margin: 5px 0; font-weight: bold; }
+        
+        button { margin: 5px 3px; padding: 10px 15px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 0.9em; transition: background-color 0.2s; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; color: #666; }
+        
+        #message-log-container { margin-top: 15px; }
+        #message-log { height: 120px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; text-align: left; background-color: #f9f9f9; border-radius: 4px; font-size: 0.85em; }
+        #message-log p { margin: 3px 0; padding-bottom: 2px; border-bottom: 1px dotted #eee; }
+        #message-log p:last-child { border-bottom: none; }
+
+        h3, h4 { margin-top: 10px; margin-bottom: 8px; color: #333; }
+        .unit-buttons button { background-color: #28a745; }
+        .unit-buttons button:hover { background-color: #1e7e34; }
+        #upgrade-base-button { background-color: #ffc107; color: #212529; }
+        #upgrade-base-button:hover { background-color: #e0a800; }
+        #attack-button { background-color: #dc3545; font-weight: bold; }
+        #attack-button:hover { background-color: #c82333; }
+        #pause-button { background-color: #6c757d; }
+        #pause-button:hover { background-color: #545b62; }
+
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <h2>River Battle Game</h2>
+
+        <div class="status-section">
+            <div class="player-status">
+                Player: Money: <span id="player-money">0</span> | Base Lvl: <span id="player-base-level">1</span> (HP: <span id="player-base-hp">0</span>)<br>
+                Soldiers: <span id="player-soldiers">0</span> | Tanks: <span id="player-tanks">0</span> | Boats: <span id="player-boats">0</span>
+            </div>
+            <div class="ai-status">
+                AI: Money: <span id="ai-money">0</span> | Base Lvl: <span id="ai-base-level">1</span> (HP: <span id="ai-base-hp">0</span>)<br>
+                AI Soldiers: <span id="ai-soldiers">0</span> | AI Tanks: <span id="ai-tanks">0</span> | AI Boats: <span id="ai-boats">0</span>
+            </div>
+        </div>
+
+        <div class="main-areas">
+            <div class="player-area">
+                <h3>Your Territory</h3>
+                <div id="player-pond" class="pond">YOUR POND</div>
+                <button id="fish-button">Fish (Get 1-5 Money)</button><br>
+                <button id="upgrade-base-button">Upgrade Base (Cost: <span id="upgrade-cost">20</span>)</button>
+                <h4>Buy Units:</h4>
+                <div class="unit-buttons">
+                    <button id="buy-soldier-button">Buy Soldier (Cost: 5)</button>
+                    <button id="buy-tank-button" style="display:none;">Buy Tank (Cost: 15)</button>
+                    <button id="buy-boat-button" style="display:none;">Buy Boat (Cost: 10)</button>
+                </div>
+            </div>
+
+            <div class="ai-area">
+                <h3>AI Territory</h3>
+                <div id="ai-pond" class="pond">AI POND</div>
+                <p>(AI acts automatically)</p>
+            </div>
+        </div>
+
+        <div id="river-area">
+            <p>--- RIVER ---</p>
+            <button id="attack-button" style="display:none;">ATTACK AI!</button>
+        </div>
+        
+        <div id="message-log-container">
+            <h4>Game Log:</h4>
+            <div id="message-log"></div>
+        </div>
+        <button id="pause-button">Pause Game</button>
+        <button onclick="initializeGame()">Restart Game</button>
+    </div>
+
+    <script>
+        // Game Constants
+        const SOLDIER_COST = 5, SOLDIER_ATK = 2, SOLDIER_HP = 10;
+        const TANK_COST = 15, TANK_ATK = 5, TANK_HP = 25;
+        const BOAT_COST = 10; // Enables attack, not a combat unit itself
+
+        const BASE_LEVEL_COSTS = { 2: 20, 3: 30 }; // Cost to upgrade TO this level
+        const BASE_HP_LEVELS = { 1: 50, 2: 100, 3: 150 };
+        const MAX_BASE_LEVEL = 3;
+
+        const FISHING_MIN_MONEY = 1, FISHING_MAX_MONEY = 5;
+        const AI_ACTION_INTERVAL = 3000; // AI acts every 3 seconds
+        const AI_MONEY_GAIN_INTERVAL = 2000; // AI gets money every 2 seconds
+        const AI_MONEY_PER_TICK = 3;
+
+
+        // Game State
+        let player, ai, gamePaused, gameOver, aiInterval, aiMoneyInterval;
+
+        // DOM Elements
+        const el = {
+            playerMoney: document.getElementById('player-money'),
+            playerBaseLevel: document.getElementById('player-base-level'),
+            playerBaseHp: document.getElementById('player-base-hp'),
+            playerSoldiers: document.getElementById('player-soldiers'),
+            playerTanks: document.getElementById('player-tanks'),
+            playerBoats: document.getElementById('player-boats'),
+            
+            aiMoney: document.getElementById('ai-money'),
+            aiBaseLevel: document.getElementById('ai-base-level'),
+            aiBaseHp: document.getElementById('ai-base-hp'),
+            aiSoldiers: document.getElementById('ai-soldiers'),
+            aiTanks: document.getElementById('ai-tanks'),
+            aiBoats: document.getElementById('ai-boats'),
+
+            upgradeCost: document.getElementById('upgrade-cost'),
+            buyTankButton: document.getElementById('buy-tank-button'),
+            buyBoatButton: document.getElementById('buy-boat-button'),
+            attackButton: document.getElementById('attack-button'),
+            upgradeBaseButton: document.getElementById('upgrade-base-button'),
+            messageLog: document.getElementById('message-log'),
+            pauseButton: document.getElementById('pause-button'),
+        };
+
+        function initializeGame() {
+            player = {
+                name: "Player",
+                money: 10,
+                baseLevel: 1,
+                baseHp: BASE_HP_LEVELS[1],
+                units: { soldiers: 0, tanks: 0, boats: 0 }
+            };
+            ai = {
+                name: "AI",
+                money: 10,
+                baseLevel: 1,
+                baseHp: BASE_HP_LEVELS[1],
+                units: { soldiers: 0, tanks: 0, boats: 0 }
+            };
+            gamePaused = false;
+            gameOver = false;
+            el.messageLog.innerHTML = '';
+            logMessage("Game started. Good luck!", "system");
+
+            if (aiInterval) clearInterval(aiInterval);
+            if (aiMoneyInterval) clearInterval(aiMoneyInterval);
+            aiMoneyInterval = setInterval(aiGainMoney, AI_MONEY_GAIN_INTERVAL);
+            aiInterval = setInterval(aiAct, AI_ACTION_INTERVAL);
+            
+            el.pauseButton.textContent = "Pause Game";
+            enablePlayerControls();
+            updateDisplay();
+        }
+
+        function logMessage(message, type = 'info') {
+            if (!el.messageLog) return;
+            const p = document.createElement('p');
+            p.textContent = message;
+            if (type === 'error') p.style.color = 'red';
+            else if (type === 'success') p.style.color = 'green';
+            else if (type === 'player') p.style.color = 'blue';
+            else if (type === 'ai_action') p.style.color = 'purple';
+            else if (type === 'combat') { p.style.fontWeight = 'bold'; p.style.color = '#d9534f'; }
+            else if (type === 'system') { p.style.fontStyle = 'italic'; p.style.color = '#555'; }
+            
+            el.messageLog.appendChild(p);
+            el.messageLog.scrollTop = el.messageLog.scrollHeight;
+        }
+
+        function updateDisplay() {
+            // Player
+            el.playerMoney.textContent = player.money;
+            el.playerBaseLevel.textContent = player.baseLevel;
+            el.playerBaseHp.textContent = player.baseHp;
+            el.playerSoldiers.textContent = player.units.soldiers;
+            el.playerTanks.textContent = player.units.tanks;
+            el.playerBoats.textContent = player.units.boats;
+
+            // AI
+            el.aiMoney.textContent = ai.money;
+            el.aiBaseLevel.textContent = ai.baseLevel;
+            el.aiBaseHp.textContent = ai.baseHp;
+            el.aiSoldiers.textContent = ai.units.soldiers;
+            el.aiTanks.textContent = ai.units.tanks;
+            el.aiBoats.textContent = ai.units.boats;
+
+            // Conditional Buttons for Player
+            el.buyTankButton.style.display = player.baseLevel >= 2 ? 'inline-block' : 'none';
+            el.buyBoatButton.style.display = player.baseLevel >= 3 ? 'inline-block' : 'none';
+            el.attackButton.style.display = (player.baseLevel >= 3 && player.units.boats > 0 && (player.units.soldiers > 0 || player.units.tanks > 0)) ? 'inline-block' : 'none';
+            
+            if (player.baseLevel >= MAX_BASE_LEVEL) {
+                el.upgradeBaseButton.disabled = true;
+                el.upgradeBaseButton.textContent = "Base Max Level";
+            } else {
+                el.upgradeBaseButton.disabled = false;
+                el.upgradeCost.textContent = BASE_LEVEL_COSTS[player.baseLevel + 1];
+                el.upgradeBaseButton.innerHTML = `Upgrade Base (Cost: <span id="upgrade-cost">${BASE_LEVEL_COSTS[player.baseLevel + 1]}</span>)`;
+            }
+        }
+
+        function playerFish() {
+            if (gameOver || gamePaused) return;
+            const amount = Math.floor(Math.random() * (FISHING_MAX_MONEY - FISHING_MIN_MONEY + 1)) + FISHING_MIN_MONEY;
+            player.money += amount;
+            logMessage(`Player fished and got ${amount} money.`, "player");
+            updateDisplay();
+        }
+
+        function playerUpgradeBase() {
+            if (gameOver || gamePaused) return;
+            if (player.baseLevel >= MAX_BASE_LEVEL) {
+                logMessage("Base is already at max level.", "error");
+                return;
+            }
+            const cost = BASE_LEVEL_COSTS[player.baseLevel + 1];
+            if (player.money >= cost) {
+                player.money -= cost;
+                player.baseLevel++;
+                player.baseHp = BASE_HP_LEVELS[player.baseLevel];
+                logMessage(`Player upgraded base to Level ${player.baseLevel}!`, "success");
+                updateDisplay();
+            } else {
+                logMessage("Not enough money to upgrade base.", "error");
+            }
+        }
+
+        function playerBuyUnit(unitType) {
+            if (gameOver || gamePaused) return;
+            let cost, unitName;
+            switch(unitType) {
+                case 'soldier': cost = SOLDIER_COST; unitName = "Soldier"; break;
+                case 'tank': 
+                    if (player.baseLevel < 2) { logMessage("Need Base Level 2 to build tanks.", "error"); return; }
+                    cost = TANK_COST; unitName = "Tank"; break;
+                case 'boat': 
+                    if (player.baseLevel < 3) { logMessage("Need Base Level 3 to build boats.", "error"); return; }
+                    cost = BOAT_COST; unitName = "Boat"; break;
+                default: return;
+            }
+
+            if (player.money >= cost) {
+                player.money -= cost;
+                player.units[unitType + 's']++; // e.g. player.units.soldiers++
+                logMessage(`Player bought a ${unitName}.`, "player");
+                updateDisplay();
+            } else {
+                logMessage(`Not enough money to buy ${unitName}.`, "error");
+            }
+        }
+        
+        function executeCombat(attacker, defender) {
+            logMessage(`${attacker.name} is attacking ${defender.name}!`, "combat");
+
+            let attackerDmgOutput = (attacker.units.soldiers * SOLDIER_ATK) + (attacker.units.tanks * TANK_ATK);
+            let defenderDmgOutput = (defender.units.soldiers * SOLDIER_ATK) + (defender.units.tanks * TANK_ATK);
+
+            // Attacker damages defender's units, then base
+            let dmgToDefenderSoldiers = Math.min(defender.units.soldiers, Math.floor(attackerDmgOutput / SOLDIER_HP));
+            defender.units.soldiers -= dmgToDefenderSoldiers;
+            attackerDmgOutput -= dmgToDefenderSoldiers * SOLDIER_HP;
+            if (attackerDmgOutput < 0) attackerDmgOutput = 0;
+            logMessage(`${attacker.name} destroyed ${dmgToDefenderSoldiers} of ${defender.name}'s soldiers.`, "combat");
+
+            let dmgToDefenderTanks = Math.min(defender.units.tanks, Math.floor(attackerDmgOutput / TANK_HP));
+            defender.units.tanks -= dmgToDefenderTanks;
+            attackerDmgOutput -= dmgToDefenderTanks * TANK_HP;
+            if (attackerDmgOutput < 0) attackerDmgOutput = 0;
+            logMessage(`${attacker.name} destroyed ${dmgToDefenderTanks} of ${defender.name}'s tanks.`, "combat");
+            
+            if (attackerDmgOutput > 0) {
+                defender.baseHp -= attackerDmgOutput;
+                logMessage(`${attacker.name} dealt ${attackerDmgOutput} damage to ${defender.name}'s base.`, "combat");
+            }
+
+            // Defender damages attacker's units (no base damage from defenders in this exchange)
+            let dmgToAttackerSoldiers = Math.min(attacker.units.soldiers, Math.floor(defenderDmgOutput / SOLDIER_HP));
+            attacker.units.soldiers -= dmgToAttackerSoldiers;
+            defenderDmgOutput -= dmgToAttackerSoldiers * SOLDIER_HP;
+            if (defenderDmgOutput < 0) defenderDmgOutput = 0;
+            logMessage(`${defender.name} destroyed ${dmgToAttackerSoldiers} of ${attacker.name}'s soldiers.`, "combat");
+            
+            let dmgToAttackerTanks = Math.min(attacker.units.tanks, Math.floor(defenderDmgOutput / TANK_HP));
+            attacker.units.tanks -= dmgToAttackerTanks;
+            logMessage(`${defender.name} destroyed ${dmgToAttackerTanks} of ${attacker.name}'s tanks.`, "combat");
+
+            // Attacker's attacking units are reset (they were sent to battle)
+            // No, they are reduced by defender's counter-attack. This is fine.
+            
+            updateDisplay();
+            checkGameOver();
+        }
+
+        function playerAttack() {
+            if (gameOver || gamePaused) return;
+            if (player.baseLevel < 3 || player.units.boats === 0) {
+                logMessage("Player needs Base L3 and a Boat to attack across the river.", "error");
+                return;
+            }
+            if (player.units.soldiers === 0 && player.units.tanks === 0) {
+                logMessage("Player has no soldiers or tanks to attack with.", "error");
+                return;
+            }
+            executeCombat(player, ai);
+        }
+        
+        function aiGainMoney() {
+            if (gameOver || gamePaused) return;
+            ai.money += AI_MONEY_PER_TICK;
+            // logMessage(`AI gained ${AI_MONEY_PER_TICK} money passively.`, "ai_action"); // Can be spammy
+            updateDisplay();
+        }
+
+        function aiAct() {
+            if (gameOver || gamePaused) return;
+
+            // Priority: Upgrade > Boats > Tanks > Soldiers > Attack
+            // 1. Try to Upgrade Base
+            if (ai.baseLevel < MAX_BASE_LEVEL && ai.money >= BASE_LEVEL_COSTS[ai.baseLevel + 1]) {
+                if (Math.random() < 0.7) { // 70% chance to upgrade if affordable
+                    ai.money -= BASE_LEVEL_COSTS[ai.baseLevel + 1];
+                    ai.baseLevel++;
+                    ai.baseHp = BASE_HP_LEVELS[ai.baseLevel];
+                    logMessage(`AI upgraded base to Level ${ai.baseLevel}.`, "ai_action");
+                    updateDisplay();
+                    return; // Acted
+                }
+            }
+
+            // 2. Try to Build a Boat if L3 and none
+            if (ai.baseLevel >= 3 && ai.units.boats < 1 && ai.money >= BOAT_COST) {
+                 if (Math.random() < 0.8) {
+                    ai.money -= BOAT_COST;
+                    ai.units.boats++;
+                    logMessage("AI built a Boat.", "ai_action");
+                    updateDisplay();
+                    return; // Acted
+                }
+            }
+
+            // 3. Try to Build Tanks if L2+
+            if (ai.baseLevel >= 2 && ai.money >= TANK_COST) {
+                // Prefer tanks if player has many soldiers or some tanks
+                let buildTankChance = (player.units.soldiers > ai.units.soldiers + 2 || player.units.tanks > 0) ? 0.6 : 0.4;
+                if (ai.units.tanks < 5 && Math.random() < buildTankChance) { // Limit AI tanks somewhat
+                    ai.money -= TANK_COST;
+                    ai.units.tanks++;
+                    logMessage("AI built a Tank.", "ai_action");
+                    updateDisplay();
+                    return; // Acted
+                }
+            }
+            
+            // 4. Try to Build Soldiers
+            if (ai.money >= SOLDIER_COST) {
+                if (ai.units.soldiers < 10 && Math.random() < 0.5) { // Limit AI soldiers somewhat
+                    ai.money -= SOLDIER_COST;
+                    ai.units.soldiers++;
+                    logMessage("AI built a Soldier.", "ai_action");
+                    updateDisplay();
+                    return; // Acted
+                }
+            }
+
+            // 5. Consider Attacking
+            if (ai.baseLevel >= 3 && ai.units.boats > 0 && (ai.units.soldiers > 2 || ai.units.tanks > 0)) {
+                const aiStrength = (ai.units.soldiers * SOLDIER_ATK) + (ai.units.tanks * TANK_ATK);
+                const playerStrength = (player.units.soldiers * SOLDIER_ATK) + (player.units.tanks * TANK_ATK);
+                if (aiStrength > playerStrength * 1.2 && Math.random() < 0.3) { // If AI is 20% stronger, 30% chance to attack
+                    logMessage("AI is launching an attack!", "ai_action");
+                    executeCombat(ai, player);
+                    return; // Acted
+                }
+            }
+        }
+        
+        function checkGameOver() {
+            if (player.baseHp <= 0) {
+                gameOver = true;
+                logMessage("AI WINS! Your base has been destroyed.", "system");
+                alert("Game Over! The AI has destroyed your base.");
+            } else if (ai.baseHp <= 0) {
+                gameOver = true;
+                logMessage("PLAYER WINS! You destroyed the AI's base!", "system");
+                alert("Congratulations! You have destroyed the AI's base!");
+            }
+            if (gameOver) {
+                clearInterval(aiInterval);
+                clearInterval(aiMoneyInterval);
+                disablePlayerControls();
+            }
+        }
+
+        function togglePause() {
+            if (gameOver) return;
+            gamePaused = !gamePaused;
+            if (gamePaused) {
+                clearInterval(aiInterval);
+                clearInterval(aiMoneyInterval);
+                el.pauseButton.textContent = "Resume Game";
+                logMessage("Game Paused.", "system");
+                disablePlayerControls(); // Disable controls during pause
+            } else {
+                aiMoneyInterval = setInterval(aiGainMoney, AI_MONEY_GAIN_INTERVAL);
+                aiInterval = setInterval(aiAct, AI_ACTION_INTERVAL);
+                el.pauseButton.textContent = "Pause Game";
+                logMessage("Game Resumed.", "system");
+                enablePlayerControls(); // Re-enable controls
+            }
+        }
+        
+        function disablePlayerControls() {
+            document.getElementById('fish-button').disabled = true;
+            el.upgradeBaseButton.disabled = true;
+            document.getElementById('buy-soldier-button').disabled = true;
+            el.buyTankButton.disabled = true;
+            el.buyBoatButton.disabled = true;
+            el.attackButton.disabled = true;
+        }
+
+        function enablePlayerControls() {
+            if (gameOver) return; // Don't enable if game is over
+            document.getElementById('fish-button').disabled = false;
+            // upgrade button disable state handled by updateDisplay based on max level
+            el.upgradeBaseButton.disabled = player.baseLevel >= MAX_BASE_LEVEL; 
+            document.getElementById('buy-soldier-button').disabled = false;
+            el.buyTankButton.disabled = false; // Visibility handled by updateDisplay
+            el.buyBoatButton.disabled = false; // Visibility handled by updateDisplay
+            el.attackButton.disabled = false; // Visibility handled by updateDisplay
+        }
+
+
+        // Event Listeners
+        document.getElementById('fish-button').addEventListener('click', playerFish);
+        el.upgradeBaseButton.addEventListener('click', playerUpgradeBase);
+        document.getElementById('buy-soldier-button').addEventListener('click', () => playerBuyUnit('soldier'));
+        el.buyTankButton.addEventListener('click', () => playerBuyUnit('tank'));
+        el.buyBoatButton.addEventListener('click', () => playerBuyUnit('boat'));
+        el.attackButton.addEventListener('click', playerAttack);
+        el.pauseButton.addEventListener('click', togglePause);
+
+        // Start Game
+        initializeGame();
+    </script>
+</body>
+</html>
